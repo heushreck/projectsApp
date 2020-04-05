@@ -16,7 +16,29 @@ An loged in Admin user can create a new users
 ### Seeing all users
 Also only an Admin can see users and manipulate them
 `GET /users`
-
+**Response**
+```
+[
+    {
+        "user_name": "Admin",
+        "password": "sha256$13FgwDu0$d29a3d637177e6b3fa47f84daecffbc019a09151c7b130",
+        "public_id": "4638175e-f122-b594-1cbff5dd39e7",
+        "admin": true
+    },
+    {
+        "user_name": "Nicolas",
+        "password": "sha256$YRae0qf6$d56e906d1dd605dc533370194e35b2a6307805cb6e3f41678d",
+        "public_id": "87e01fa8-1670840f-181b0028c967",
+        "admin": false
+    },
+    {
+        "user_name": "Thomas",
+        "password": "sha256$srvm7f71140b78a4bab7f204784c17d0f7954903a591baf4258",
+        "public_id": "023fa3b9-4505-ba9b-093ede9addde",
+        "admin": false
+    }
+]
+```
 ### Seeing one user
 Admin only
 `GET /users/<string:public_id>`
