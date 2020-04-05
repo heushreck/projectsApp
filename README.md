@@ -15,7 +15,9 @@ An loged in Admin user can create a new users
 ```
 ### Seeing all users
 Also only an Admin can see users and manipulate them
+
 `GET /users`
+
 **Response**
 ```
 [
