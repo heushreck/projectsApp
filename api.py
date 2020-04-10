@@ -6,7 +6,7 @@ import jwt
 import datetime
 
 # Import the framework
-from flask import Flask, g, render_template, request, make_response
+from flask import Flask, g, render_template, request, make_response, session, redirect, url_for
 from flask_restful import Resource, Api, reqparse
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
@@ -19,7 +19,7 @@ api = Api(app)
 
 # Authentication
 
-app.config['SECRET_KEY'] = 'thisissecret'
+app.config['SECRET_KEY'] = 'verysecret'
 
 def get_db():
     db = getattr(g, '_project_database', None)
@@ -67,6 +67,13 @@ def token_required(f):
         return f(current_user, *args, **kwargs)
     return decorated
 
+@app.before_request
+def before_request():
+    g.user = None
+    if 'user_public_id' in session:
+        shelf = get_user_db()
+        g.user = shelf[session["user_public_id"]]
+
 @app.route("/")
 def home():
     return render_template("home.html")
@@ -75,18 +82,60 @@ def home():
 def about():
     return render_template("about.html")
 
+@app.route('/logout')
+def logout():
+    session.pop('token', None)
+    session.pop('user_public_id', None)
+    return redirect(url_for('weblogin'))
+
+@socketio.on('disconnect')
+def disconnect_user():
+    session.pop('token', None)
+    session.pop('user_public_id', None)
+
+@app.route('/listofprojects')
+def listofprojects():
+    if 'user_public_id' in session:
+        return render_template('projectlist.html')
+    else:
+        return redirect(url_for('weblogin'))
+
 @app.route("/readme")
 def index():
     """Present some documentation"""
-
     # Open the README file
     with open('README.md', 'r') as markdown_file:
-
         # Read the content of the file
         content = markdown_file.read()
-
         # Convert to HTML
         return markdown.markdown(content)
+
+@app.route('/weblogin', methods=['GET', 'POST'])
+def weblogin():
+    if request.method == 'POST':
+        session.pop('token', None)
+        session.pop('user_public_id', None)
+        username = request.form['username']
+        password = request.form['password']
+        print(username + "  " + password)
+
+        shelf = get_user_db()
+        keys = list(shelf.keys())
+
+        user = None
+        for key in keys:
+            if shelf[key]['user_name'] == username:
+                user = shelf[key]
+
+        if user and check_password_hash(user.password, password):
+            session['user_public_id'] = user['public_id']
+            token = jwt.encode({'public_id': user['public_id'], 'exp' : datetime.datetime.utcnow() + datetime.timedelta(hours=3)}, app.config['SECRET_KEY'])
+            session['token'] = token.decode('UTF-8')
+            return redirect(url_for('listofprojects'))
+
+        return render_template('weblogin.html')
+
+    return render_template('weblogin.html')
 
 class UserList(Resource):
     @token_required
