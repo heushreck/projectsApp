@@ -10,6 +10,7 @@ from flask import Flask, g, render_template, request, make_response, session, re
 from flask_restful import Resource, Api, reqparse
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 
 # Create an instance of Flask
 app = Flask(__name__)
@@ -45,6 +46,26 @@ def teardown_user_db(exception):
     if db is not None:
         db.close()
 
+class User(UserMixin, db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(15), unique=True)
+    email = db.Column(db.String(50), unique=True)
+    password = db.Column(db.String(80))
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
+class LoginForm(FlaskForm):
+    username = StringField('username', validators=[InputRequired(), Length(min=4, max=15)])
+    password = PasswordField('password', validators=[InputRequired(), Length(min=8, max=80)])
+    remember = BooleanField('remember me')
+
+class RegisterForm(FlaskForm):
+    email = StringField('email', validators=[InputRequired(), Email(message='Invalid email'), Length(max=50)])
+    username = StringField('username', validators=[InputRequired(), Length(min=4, max=15)])
+    password = PasswordField('password', validators=[InputRequired(), Length(min=8, max=80)])
+
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -67,13 +88,6 @@ def token_required(f):
         return f(current_user, *args, **kwargs)
     return decorated
 
-@app.before_request
-def before_request():
-    g.user = None
-    if 'user_public_id' in session:
-        shelf = get_user_db()
-        g.user = shelf[session["user_public_id"]]
-
 @app.route("/")
 def home():
     return render_template("home.html")
@@ -82,60 +96,48 @@ def home():
 def about():
     return render_template("about.html")
 
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    form = LoginForm()
+
+    if form.validate_on_submit():
+        user = User.query.filter_by(username=form.username.data).first()
+        if user:
+            if check_password_hash(user.password, form.password.data):
+                login_user(user, remember=form.remember.data)
+                return redirect(url_for('dashboard'))
+
+        return '<h1>Invalid username or password</h1>'
+        #return '<h1>' + form.username.data + ' ' + form.password.data + '</h1>'
+
+    return render_template('login.html', form=form)
+
+@app.route('/signup', methods=['GET', 'POST'])
+def signup():
+    form = RegisterForm()
+
+    if form.validate_on_submit():
+        hashed_password = generate_password_hash(form.password.data, method='sha256')
+        new_user = User(username=form.username.data, email=form.email.data, password=hashed_password)
+        db.session.add(new_user)
+        db.session.commit()
+
+        return '<h1>New user has been created!</h1>'
+        #return '<h1>' + form.username.data + ' ' + form.email.data + ' ' + form.password.data + '</h1>'
+
+    return render_template('signup.html', form=form)
+
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    return render_template('dashboard.html', name=current_user.username)
+
 @app.route('/logout')
+@login_required
 def logout():
-    session.pop('token', None)
-    session.pop('user_public_id', None)
-    return redirect(url_for('weblogin'))
+    logout_user()
+    return redirect(url_for('index'))
 
-@socketio.on('disconnect')
-def disconnect_user():
-    session.pop('token', None)
-    session.pop('user_public_id', None)
-
-@app.route('/listofprojects')
-def listofprojects():
-    if 'user_public_id' in session:
-        return render_template('projectlist.html')
-    else:
-        return redirect(url_for('weblogin'))
-
-@app.route("/readme")
-def index():
-    """Present some documentation"""
-    # Open the README file
-    with open('README.md', 'r') as markdown_file:
-        # Read the content of the file
-        content = markdown_file.read()
-        # Convert to HTML
-        return markdown.markdown(content)
-
-@app.route('/weblogin', methods=['GET', 'POST'])
-def weblogin():
-    if request.method == 'POST':
-        session.pop('token', None)
-        session.pop('user_public_id', None)
-        username = request.form['username']
-        password = request.form['password']
-        print(username + "  " + password)
-
-        shelf = get_user_db()
-        keys = list(shelf.keys())
-
-        user = None
-        for key in keys:
-            if shelf[key]['user_name'] == username:
-                user = shelf[key]
-
-        if user and check_password_hash(user.password, password):
-            session['user_public_id'] = user['public_id']
-            token = jwt.encode({'public_id': user['public_id'], 'exp' : datetime.datetime.utcnow() + datetime.timedelta(hours=3)}, app.config['SECRET_KEY'])
-            session['token'] = token.decode('UTF-8')
-            return redirect(url_for('listofprojects'))
-
-        return render_template('weblogin.html')
-
-    return render_template('weblogin.html')
 
 class UserList(Resource):
     @token_required
